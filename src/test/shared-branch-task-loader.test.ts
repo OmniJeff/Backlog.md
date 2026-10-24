@@ -46,9 +46,15 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("shared immutable branch task loading", () => {
-	it("keeps newer local UTC updates ahead of older branch timestamps in either storage format", async () => {
+	it("reads a newer local copy's branch twin only under most_progressed, in either storage format", async () => {
 		const path = "backlog/tasks/task-1 - Local.md";
-		for (const strategy of ["most_recent", "most_progressed"] as const) {
+		// most_recent: the local copy is newer than the branch's last commit, so the branch copy cannot
+		// win and is not read. most_progressed: the branch copy may carry a status further along
+		// whatever the dates say, so it is read once and the identity index compares the two.
+		for (const [strategy, expectedReads] of [
+			["most_recent", 0],
+			["most_progressed", 1],
+		] as const) {
 			for (const updatedDate of ["2026-10-19 11:00", "2026-10-19T11:00:00Z"]) {
 				let reads = 0;
 				const git = {
@@ -70,7 +76,7 @@ describe("shared immutable branch task loading", () => {
 					updatedDate,
 					filePath: `/tmp/mixed-utc/${path}`,
 				};
-				await new BranchTaskLoader(git).load(
+				const result = await new BranchTaskLoader(git).load(
 					[
 						{ name: "main", commit: "0".repeat(40), current: true },
 						{ name: "feature/older", commit: "1".repeat(40), current: false },
@@ -79,7 +85,8 @@ describe("shared immutable branch task loading", () => {
 					[local],
 					false,
 				);
-				expect(reads).toBe(0);
+				expect(reads).toBe(expectedReads);
+				expect(result.entries.filter((entry) => entry.task?.title === "Older branch")).toHaveLength(expectedReads);
 			}
 		}
 	});
@@ -223,13 +230,16 @@ describe("shared immutable branch task loading", () => {
 			};
 			core.git.getRepositoryRoot = async () => null;
 
+			// most_progressed reads the branch copy once so its status can be compared; the working
+			// copy still wins the tie of status.
 			expect((await core.queryTasks()).map((task) => task.title)).toEqual(["Working copy"]);
 			expect({ treeCalls, historyCalls, hydrationCalls }).toEqual({
 				treeCalls: 1,
 				historyCalls: 1,
-				hydrationCalls: 0,
+				hydrationCalls: 1,
 			});
 
+			// The working copy is gone; the cached branch copy stands in without a second read.
 			workingCopyTasks = [];
 			expect((await core.queryTasks()).map((task) => task.title)).toEqual(["Branch fallback"]);
 			expect({ treeCalls, historyCalls, hydrationCalls }).toEqual({

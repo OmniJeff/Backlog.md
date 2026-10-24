@@ -256,8 +256,9 @@ async function hydrateTasks(winners: HydrationCandidate[], options: HydrationOpt
 }
 
 /**
- * Choose which remote tasks need to be hydrated based on strategy
- * Returns only the tasks that are newer or more progressed than local versions
+ * Choose which remote tasks need to be hydrated based on strategy.
+ * Under "most_recent" only a copy newer than the local one; under "most_progressed" the newest
+ * copy of every task a branch carries, since its status may be further along whatever its date.
  */
 function chooseWinners(
 	localById: Map<string, Task>,
@@ -300,22 +301,18 @@ function chooseWinners(
 			continue;
 		}
 
-		// For "most_progressed", we might need to check if remote is newer
-		// to potentially have a more progressed status
-		const localTs = local.updatedDate ? (parseStoredUtcDate(local.updatedDate)?.getTime() ?? Number.NaN) : 0;
-		const maybeNewer = entries.some((e) => e.lastModified.getTime() > localTs);
-
-		if (maybeNewer) {
-			// Only hydrate the newest remote to check if it's more progressed
-			const newestRemote = selectPreferredIdentityEntry(entries);
-			winners.push({
-				id,
-				ref: toRef(newestRemote),
-				path: newestRemote.path,
-				commit: newestRemote.commit,
-				stateEntry: newestRemote.stateEntry,
-			});
-		}
+		// Under "most_progressed" a branch copy may carry a status further along than the local
+		// copy's whatever the two dates say: the task was edited on main after its branch moved it
+		// to In Progress, say. So the newest branch copy is always hydrated and the identity index
+		// compares the statuses; the loader's commit and blob caches keep that to one read per copy.
+		const newestRemote = selectPreferredIdentityEntry(entries);
+		winners.push({
+			id,
+			ref: toRef(newestRemote),
+			path: newestRemote.path,
+			commit: newestRemote.commit,
+			stateEntry: newestRemote.stateEntry,
+		});
 	}
 
 	return winners;
