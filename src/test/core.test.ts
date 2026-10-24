@@ -752,13 +752,16 @@ describe("Core", () => {
 			expect(await core.generateNextId()).toBe("BACK-2");
 		});
 
-		it("keeps the working-copy task active when a branch archived it into a leftover completed folder", async () => {
+		it("keeps the task active when a branch archived it into a leftover completed folder", async () => {
 			await commitPaddedTaskArchivedOnBranch(join(core.filesystem.backlogDir, "completed"));
 
+			// As with the archive folder: the task stays on the board, and most_progressed shows the
+			// branch copy that reached Done, archived copies included in the read or not.
 			const tasks = await core.loadTasks(undefined, undefined, { includeArchived: true });
 			const task = tasks.find((candidate) => candidate.id === "BACK-1" || candidate.id === "BACK-001");
-			expect(task?.id).toBe("BACK-1");
-			expect(task?.source).toBe("local");
+			expect(task?.id).toBe("BACK-001");
+			expect(task?.status).toBe("Done");
+			expect(task?.source).toBe("local-branch");
 		});
 
 		it("should resolve an exact legacy task ID without guessing", async () => {
